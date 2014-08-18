@@ -1,0 +1,113 @@
+#!/bin/bash
+
+#
+# Filename: vid
+#
+ 
+get_sunset_time()
+{
+    #The curl command will bring back the sunrise and sunset time
+    #curl http://www.timeanddate.com/worldclock/astronomy.html?n=224
+ 
+    sunset_date=`date "+%b %d, %Y"`
+    #echo sunset_date=$sunset_date
+    curl_output=`curl http://www.timeanddate.com/worldclock/astronomy.html?n=224 | grep -o -P "$sunset_date</td><td>.{0,23}"`
+    #echo curl_output=$curl_output
+ 
+    #curl_output=May 14, 2014</td><td>6:01 AM</td><td>8:12 PM
+ 
+    up_down_times=`echo $curl_output | grep -o -P "</td><td>.{0,7}"`
+    sunrise_string=`echo $up_down_times | cut -d " " -f 1-2`
+    sunset_string_12HR=`echo $up_down_times | cut -d " " -f 3-4`
+ 
+    #echo up_down_times=$up_down_times
+    #echo sunrise_string=$sunrise_string
+    #echo sunset_string_12HR=$sunset_string_12HR
+ 
+    sunrise=`echo $sunrise_string | awk -F'<td>' '{print $2}' | cut -c1-5`
+    sunset_string_12HR2=`echo $sunset_string_12HR | awk -F'<td>' '{print $2}'`
+ 
+    #echo sunrise=$sunrise
+    #echo sunset_string_12HR2=$sunset_string_12HR2
+ 
+    #date --date="$sunset_string_12HR2" +%T
+    #date --date="$sunset_string_12HR2" +%l:%M
+    sunset=`date --date="$sunset_string_12HR2" +%T | cut -c1-5`
+ 
+    #echo sunrise=$sunrise
+    #echo sunset=$sunset
+ 
+    hour=`expr substr "$sunset" 1 2`
+    minute=`expr substr "$sunset" 4 2`
+ 
+        # Add 35 minutes because after sun goes down, there's still some light remaining.
+        # Check if we need to bump the hour by 1 if adding 35 minutes pushes us to next hour.
+        minute2=$(($minute + 35))
+        if [ $minute2 -ge 60 ]
+        then
+                minute3=$(($minute2 - 60))
+                hour=$(($hour + 1))
+                minute=$minute3
+        fi
+ 
+    end_time="$hour:$minute"
+    #echo "end_time = $end_time"
+}
+ 
+get_sunset_time
+ 
+mypath=/home/pi/webcam
+exec 1> $mypath/url 2>&1
+ 
+rm -f $mypath/url
+rm -f $mypath/o
+rm -f $mypath/o.tmp
+rm -f $mypath/running*
+ 
+currdate=`date "+%b-%d-%y"`                   # Example: Dec-17-13
+currdate2=`date "+%b-%d-%Y__%H:%M"`               # Example: Dec-17-13_12:12
+currdate3=`date "+%b-%d-%Y__%H:%M:%S"`            # Example: Dec-17-13_12:12:12
+pattern_start=`date +%a_%b_%Oe_06:00 | sed 's/ //'`     # Example: Tue_Dec_17_06  08 = 6am
+pattern_end=`date +%a_%b_%Oe_$end_time | sed 's/ //'`       # Example: Tue_Dec_17_18  09 = 6pm
+ 
+echo "pattern_start = $pattern_start"
+echo "pattern_end = $pattern_end"
+ 
+touch /home/pi/webcam/running_vid_01__start.$currdate2  # debugging purposes
+  
+ls /var/www/archive > $mypath/pic_names.tmp 2>&1
+sed -i "s/^/\/var\/www\/archive\//g" $mypath/pic_names.tmp
+sed -n "/$pattern_start/,/$pattern_end/p" $mypath/pic_names.tmp > $mypath/todays_pics 2>&1
+  
+filename=output-$currdate2.mpg # Example: output-Dec-17-13.mpg
+  
+# Merging photos into time-lapse video
+echo "running mencoder..."
+start_mencoder=`date "+%b-%d-%Y__%H:%M:%S"` # Example: Dec-17-13_12:12
+touch /home/pi/webcam/running_vid_02__mencoder_start.$start_mencoder  # debugging purposes
+/usr/bin/mencoder -of mpeg -mpegopts format=mpeg1:tsaf:muxrate=2000 -o $filename -oac lavc -lavcopts acodec=mp2:abitrate=224 -ovc lavc -lavcopts vcodec=mpeg1video:vbitrate=1152:keyint=15:mbd=2:aspect=4/3 -mf type=jpeg:fps=24 mf://@$mypath/todays_pics > $mypath/mencoder.log
+  
+finished_mencoder=`date "+%b-%d-%Y__%H:%M:%S"` # Example: Dec-17-13_12:12
+touch /home/pi/webcam/running_vid_03__mencoder_done.$finished_mencoder   # debugging purposes
+  
+echo "Finished merging photos. "
+  
+vidfile=`ls -tr *.mpg | tail -1`
+  
+uploading=`date "+%b-%d-%Y__%H:%M:%S"` # Example: Dec-17-13_12:12
+touch /home/pi/webcam/running_vid_04__Youtube_uploading_start.$uploading  # debugging purposes
+  
+sudo -u pi /usr/bin/youtube-upload -m [email-redacted] -p [password-redacted] -t "$currdate2" --unlisted -c Tech $mypath/$vidfile | tail -1 > $mypath/url 2>&1
+  
+uploading=`date "+%b-%d-%Y__%H:%M:%S"` # Example: Dec-17-13_12:12
+touch /home/pi/webcam/running_vid_05__Youtube_uploading_done.$uploading   # debugging purposes
+  
+finished_at=`date "+%b-%d-%Y__%H:%M:%S"` # Example: Dec-17-13_12:12
+touch /home/pi/webcam/running_vid_06__finished.$finished_at   # debugging purposes
+  
+echo "Start at: $currdate3" >> $mypath/url 2>&1
+echo "Finished: $finished_at" >> $mypath/url 2>&1
+/usr/bin/mail -s "Time-Lapsed Video: $currdate2" [email-redacted] < /$mypath/url
+  
+cat url >> /home/pi/webcam/url.log 2>&1  # keep log of URLs
+echo "" >> /home/pi/webcam/url.log 2>&1  # blank line

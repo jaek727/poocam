@@ -1,0 +1,15 @@
+#
+# Filename: settings
+#
+ 
+#Photo resize
+resize_size=700
+ 
+#Start taking photos at
+start_hour=6
+ 
+#Stop taking photos at
+end_hour=19
+ 
+start_video_at=20:00
+copy_to_dropbox=yes

@@ -1,0 +1,174 @@
+#!/bin/bash
+#
+# Filename: cam
+#
+ 
+image_name=poo
+image_name_orig="$image_name"_orig
+ 
+not_uploaded="true"
+mypath=/home/pi/webcam
+settings_file=$mypath/settings
+start_video_at="18:00"  # default start time for video
+ 
+rm -f /home/pi/webcam/stop*
+rm -f /home/pi/webcam/running.*
+ 
+# ================ Big outer while loop ======================================
+ 
+while [ ! -f $mypath/stop ]
+do
+        echo "deleting older files."
+        find /var/www/archive -mtime +1 | xargs sudo rm -f
+ 
+    # ================ read settings file ================================
+ 
+        while read line
+        do
+                setting=`echo $line | awk -F"=" '{print $1}'`
+                value=`echo $line | awk -F"=" '{print $2}'`
+ 
+                if [ "$setting" = "resize_size" ]
+                then
+                        #get value after = character
+                        resize_size=`echo $line | awk -F"=" '{print $2}'`
+                        echo "resize_size= $resize_size"
+                fi
+ 
+                if [ "$setting" = "start_hour" ]
+                then
+                        #get value after = character
+                        start_hour=`echo $line | awk -F"=" '{print $2}'`
+                fi
+ 
+                if [ "$setting" = "end_hour" ]
+                then
+                        #get value after = character
+                        end_hour=`echo $line | awk -F"=" '{print $2}'`
+                fi
+ 
+                if [ "$setting" = "start_video_at" ]
+                then
+                        #get value after = character
+                        start_video_at=`echo $line | awk -F"=" '{print $2}'`
+                        echo "start_video_at = $start_video_at"
+                fi
+ 
+                if [ "$setting" = "copy_to_dropbox" ]
+                then
+                        #get value after = character
+                        copy_to_dropbox=`echo $line | awk -F"=" '{print $2}'`
+                        echo "copy_to_dropbox = $copy_to_dropbox"
+                fi
+ 
+        done < $settings_file
+ 
+        echo "taking pic..."
+ 
+    # =============== take picture =======================================
+ 
+        /usr/bin/raspistill -o $mypath/$image_name.jpg
+ 
+    # =============== resize file ========================================
+ 
+        if [ ! -f $mypath/stop ]   # resize file
+        then
+                echo "start resizing..."
+                convert $mypath/$image_name.jpg  \
+                             -resize $resize_size $mypath/temp.jpg
+                echo "done downsizing. scp... "
+        else
+                touch $mypath/stopped.$currdate2
+                echo "goodbye 1..."
+                exit
+        fi
+ 
+    # =============== embed timestamp ====================================
+ 
+        if [ ! -f $mypath/stop ]
+        then
+                currdate=`date`
+                currdate2=`echo $currdate | sed -e 's/ /_/g'`
+ 
+                echo "adding timestamp... "
+                convert -stroke red -pointsize 25 -strokewidth 1 $mypath/temp.jpg -gravity NorthWest -annotate 0 "$currdate" $mypath/annotated.jpg
+                echo "done adding timestamp... "
+ 
+                rm -f /home/pi/webcam/running.*
+                touch /home/pi/webcam/running.$currdate2
+ 
+                sudo cp $mypath/annotated.jpg /var/www/archive/$currdate2.jpg
+                sudo cp $mypath/annotated.jpg /var/www/poo.jpg
+ 
+        # ================ copy to Dropbox ==========================
+ 
+                if [ "$copy_to_dropbox" = "yes" ]
+                then
+                        hour=`date +"%H"`
+                        echo "Hour: $hour"
+                        echo "start_hour=$start_hour"
+                        echo "end_hour=$end_hour"
+                        if [ $hour -ge $start_hour ] && [ $hour -le $end_hour ]
+                        then
+                                echo "Current hour is within specified start/end"
+                                echo "------- Uploading to DropBox: $currdate2.jpg --------"
+                                #start_time=$SECONDS
+                                dropbox_uploader.sh upload /var/www/archive/$currdate2.jpg photos/cam1 &
+                        else
+                                echo "Current hour is NOT within specified start/end"
+                        fi
+                else
+                        echo "------- Not Uploading to DropBox: $currdate2.jpg --------"
+                fi
+ 
+        # ================ update web page with timestamp =======================
+ 
+                sudo cp /var/www/template.html /var/www/cam.html
+                sudo sed -i "s/timestamp_placeholder/$currdate/g"     /var/www/cam.html
+                sudo sed -i "s/filename_placeholder/$currdate2.jpg/g" /var/www/cam.html
+ 
+        # ================ move camera2 & camera3 images to /var/www ==================
+                # camera2 and camera3 images come in via scp on a regular basis
+                if [ -f $mypath/img2.jpg ]
+                then
+                        sudo mv $mypath/img2.jpg /var/www
+                fi
+ 
+                if [ -f $mypath/img3.jpg ]
+                then
+                        sudo mv $mypath/img3.jpg /var/www
+                fi
+        else
+                touch $mypath/stopped.$currdate2
+                echo "goodbye 2..."
+                exit
+        fi
+ 
+        #=======================================================
+        # This block will create the video at specified time
+ 
+        timecheck=`date +%H:%M`
+        echo $timecheck
+        rm -f /home/pi/webcam/not_uploaded_is.*
+        touch /home/pi/webcam/not_uploaded_is.$not_uploaded.$timecheck
+        echo "not_uploaded = $not_uploaded"
+        if [ $timecheck = $start_video_at ]
+        then
+                if [ $not_uploaded = "true" ]
+                then
+                        echo "It's time to create video and upload to Youtube"
+                        echo "calling vid script to make the video"
+                        touch /home/pi/webcam/running_start_video.$timecheck
+                        sudo -u pi /home/pi/webcam/make_video &
+                        not_uploaded="false"
+                fi
+        else
+                echo "not creating video"
+                not_uploaded="true"
+        fi
+ 
+        sleep 1
+done
+echo "goodbye 3..."
+touch $mypath/stopped.$currdate2
+exit
