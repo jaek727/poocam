@@ -1,6 +1,8 @@
 poocam
 ======
 
+For a full explanation of this project along with code/video/photos, please visit my blog: http://ruedurivoli.wordpress.com/2014/04/11/poo-cam/
+
 This is my Raspberry Pi surveillance script to capture who was dumping on my yard.  It was a cat!
 
 * A new photo is taken about every 20 seconds.
